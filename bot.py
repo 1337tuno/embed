@@ -4,9 +4,18 @@ from discord.ui import Button, View, Modal, TextInput
 import asyncio
 import os
 from dotenv import load_dotenv
+from flask import Flask  # For Railway health check
 
-# Load environment variables from .env file (for local testing)
+# Load environment variables
 load_dotenv()
+
+# Flask app for health checks (Railway)
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+@flask_app.route('/health')
+def health_check():
+    return {'status': 'healthy', 'bot': str(bot.user)}, 200
 
 # Define Intents
 intents = discord.Intents.default()
@@ -15,12 +24,12 @@ intents.guild_messages = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# ================= CONFIGURATION (From Environment Variables) =================
+# ================= CONFIGURATION =================
 TICKET_CATEGORY_ID = int(os.getenv("TICKET_CATEGORY_ID", "0"))
 SUPPORT_ROLE_IDS = [
     int(id.strip()) for id in os.getenv("SUPPORT_ROLE_IDS", "").split(",") if id.strip()
 ]
-# =============================================================================
+# =================================================
 
 class ServiceModal(Modal):
     def __init__(self, service_name: str):
@@ -55,7 +64,7 @@ class ServiceModal(Modal):
     async def on_submit(self, interaction: discord.Interaction):
         category = interaction.guild.get_channel(TICKET_CATEGORY_ID)
         if not category:
-            await interaction.response.send_message("❌ Ticket category not found. Please contact admin.", ephemeral=True)
+            await interaction.response.send_message("❌ Ticket category not found.", ephemeral=True)
             return
 
         channel_name = f"ticket-{self.service_name.lower().replace(' ', '-').replace('/', '-')}-{interaction.user.id}"
@@ -96,10 +105,10 @@ class ServiceModal(Modal):
         
         view = TicketCloseView()
         await channel.send(embed=embed, view=view)
-        await channel.send(f"{interaction.user.mention} Your ticket has been created! Support will assist you shortly.")
+        await channel.send(f"{interaction.user.mention} Your ticket has been created!")
         
         await interaction.response.send_message(
-            f"✅ Ticket created: {channel.mention}\n\nSupport roles have been notified!",
+            f"✅ Ticket created: {channel.mention}",
             ephemeral=True
         )
 
@@ -117,10 +126,10 @@ class TicketCloseView(View):
         is_creator = user_id and str(interaction.user.id) == user_id
         
         if not is_support and not is_creator:
-            await interaction.response.send_message("❌ You don't have permission to close this ticket!", ephemeral=True)
+            await interaction.response.send_message("❌ Permission denied!", ephemeral=True)
             return
         
-        await interaction.response.send_message("🔒 Ticket will be closed in 5 seconds...")
+        await interaction.response.send_message("🔒 Closing in 5 seconds...")
         await asyncio.sleep(5)
         await interaction.channel.delete()
 
@@ -137,6 +146,10 @@ class MainServiceView(View):
     def __init__(self):
         super().__init__(timeout=None)
         
+        # 🔥 FIRST BUTTON: FOOD with 🍔 emoji
+        self.add_item(ServiceButton(label="FOOD", emoji="🍔", service_name="FOOD"))
+        
+        # Rest of buttons
         self.add_item(ServiceButton(label="Hotel", emoji="🏨", service_name="Hotel"))
         self.add_item(ServiceButton(label="Airbnb", emoji="🏠", service_name="Airbnb"))
         self.add_item(ServiceButton(label="Car Rental", emoji="🚗", service_name="Car-Rental"))
@@ -149,20 +162,18 @@ class MainServiceView(View):
         self.add_item(ServiceButton(label="UEats", emoji="🛒", service_name="UEats"))
         self.add_item(ServiceButton(label="Groceries", emoji="🛍️", service_name="Groceries"))
         self.add_item(ServiceButton(label="Other Services", emoji="🔧", service_name="Other-Services"))
-        self.add_item(ServiceButton(label="FOOD", emoji="🍕", service_name="FOOD"))
         self.add_item(ServiceButton(label="Any Type Tickets", emoji="🎟️", service_name="Any-Type-Tickets"))
 
 class TicketsView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        tickets_btn = ServiceButton(label="Tickets", emoji="🎟️", service_name="Tickets")
-        self.add_item(tickets_btn)
+        self.add_item(ServiceButton(label="Tickets", emoji="🎟️", service_name="Tickets"))
 
 @bot.command(name='services')
 @commands.has_permissions(administrator=True)
 async def services_command(ctx):
     embed = discord.Embed(
-        title="🔥 30–50% OFF Everyday Purchases & Services 🔥",
+        title="🔥❤️ 30–50% OFF Everyday Purchases & Services 🔥❤️",  # 🔥❤️ at top
         description="Select a service below to begin your Beast order.",
         color=discord.Color.red()
     )
@@ -190,8 +201,15 @@ async def tickets_command(ctx):
 @bot.event
 async def on_ready():
     print(f'✅ Logged in as {bot.user}')
-    print(f'🔗 Invite Link: https://discord.com/api/oauth2/authorize?client_id={bot.user.id}&permissions=8&scope=bot')
-    print(f'📋 Support Role IDs: {SUPPORT_ROLE_IDS}')
+    print(f'🔗 Invite: https://discord.com/api/oauth2/authorize?client_id={bot.user.id}&permissions=8&scope=bot')
 
-# Run the bot
-bot.run(os.getenv("DISCORD_TOKEN"))
+# Run both Flask and Discord bot
+def run_flask():
+    flask_app.run(host='0.0.0.0', port=int(os.getenv("PORT", 8080)))
+
+if __name__ == "__main__":
+    # Start Flask in background thread for health checks
+    import threading
+    threading.Thread(target=run_flask, daemon=True).start()
+    # Start Discord bot
+    bot.run(os.getenv("DISCORD_TOKEN"))
